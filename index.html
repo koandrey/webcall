@@ -1,0 +1,106 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Personal WebRTC Video (Android 15 fix)</title>
+    <style>
+      body { font-family: Arial, sans-serif; padding:20px; }
+      video { width: 100%; max-width: 320px; height: auto; background: #000; }
+      .videos { display: flex; flex-direction: column; gap:20px; }
+      @media(min-width:700px){ .videos { flex-direction: row; } }
+      textarea { width:100%; height:150px; margin-top:12px; }
+      button { margin-right: 8px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Персональные видеозвонки (WebRTC, без Node.js)</h1>
+
+    <div class="videos">
+      <div>
+        <h3>Местное</h3>
+        <video id="localVideo" autoplay muted playsinline></video>
+      </div>
+      <div>
+        <h3>Удалённое</h3>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </div>
+    </div>
+
+    <div>
+      <button onclick="createOffer()">Создать Offer</button>
+      <button onclick="createAnswer()">Создать Answer</button>
+      <button onclick="addRemoteDesc()">Применить удалённое SDP</button>
+    </div>
+
+    <textarea id="sdpData" placeholder="Сюда вставляйте/копируйте SDP"></textarea>
+
+    <script>
+      let pc;
+      const localVideo = document.getElementById('localVideo');
+      const remoteVideo = document.getElementById('remoteVideo');
+      const sdpBox = document.getElementById('sdpData');
+
+      async function init(){
+        // Проверка HTTPS (на Android/iOS доступ к камере блокируется без HTTPS)
+        if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
+          alert('⚠️ Для доступа к камере и микрофону на Android 15 откройте страницу по HTTPS или с localhost.');
+          return;
+        }
+
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        pc.ontrack = (e) => {
+          remoteVideo.srcObject = e.streams[0];
+        };
+
+        pc.onicecandidate = (e) => {
+          if(e.candidate) return; // ждём конца сбора
+          sdpBox.value = JSON.stringify(pc.localDescription);
+        };
+
+        try {
+          // Запрашиваем разрешения отдельно (для Android лучше сначала запросить audio, потом video)
+          const audio = await navigator.mediaDevices.getUserMedia({audio:true});
+          const video = await navigator.mediaDevices.getUserMedia({video:true});
+          const stream = new MediaStream([...audio.getTracks(), ...video.getTracks()]);
+
+          localVideo.srcObject = stream;
+          stream.getTracks().forEach(track => pc.addTrack(track, stream));
+        } catch(err) {
+          console.error(err);
+          alert('Ошибка доступа к камере/микрофону: ' + err.name + ' — ' + err.message);
+        }
+      }
+      init();
+
+      async function createOffer(){
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+      }
+
+      async function createAnswer(){
+        const offer = JSON.parse(sdpBox.value);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+      }
+
+      async function addRemoteDesc(){
+        const remote = JSON.parse(sdpBox.value);
+        await pc.setRemoteDescription(new RTCSessionDescription(remote));
+      }
+    </script>
+
+    <p><strong>Как пользоваться (Android 15, iOS, ПК):</strong></p>
+    <ol>
+      <li>Обязательно откройте страницу по HTTPS или через <code>localhost</code>. Android 15 не даст доступ к камере в <code>http://</code>.</li>
+      <li>Разрешите браузеру доступ к камере и микрофону.</li>
+      <li>Дальше обмен SDP так же, как и раньше: Offer → Answer.</li>
+    </ol>
+
+    <p><strong>Совет:</strong> Для удобного теста загрузите файл на GitHub Pages, Netlify или Vercel (они используют HTTPS по умолчанию).</p>
+  </body>
+</html>
