@@ -3,18 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Personal WebRTC Video (Android 15 fix)</title>
+    <title>WebRTC Manual Signaling (Offer/Answer)</title>
     <style>
       body { font-family: Arial, sans-serif; padding:20px; }
       video { width: 100%; max-width: 320px; height: auto; background: #000; }
       .videos { display: flex; flex-direction: column; gap:20px; }
       @media(min-width:700px){ .videos { flex-direction: row; } }
-      textarea { width:100%; height:150px; margin-top:12px; }
-      button { margin-right: 8px; margin-top: 8px; }
+      textarea { width:100%; height:120px; margin-top:12px; }
+      button { margin: 6px 6px 0 0; }
     </style>
   </head>
   <body>
-    <h1>Персональные видеозвонки (WebRTC, без Node.js)</h1>
+    <h1>Персональные видеозвонки (WebRTC без сигналинг-сервера)</h1>
 
     <div class="videos">
       <div>
@@ -27,24 +27,31 @@
       </div>
     </div>
 
-    <div>
-      <button onclick="createOffer()">Создать Offer</button>
-      <button onclick="createAnswer()">Создать Answer</button>
-      <button onclick="addRemoteDesc()">Применить удалённое SDP</button>
-    </div>
+    <h3>Offer</h3>
+    <button onclick="createOffer()">Создать Offer</button>
+    <button onclick="copyToClipboard('offerBox')">Копировать Offer</button>
+    <textarea id="offerBox" placeholder="Offer SDP"></textarea>
 
-    <textarea id="sdpData" placeholder="Сюда вставляйте/копируйте SDP"></textarea>
+    <h3>Answer</h3>
+    <button onclick="createAnswer()">Создать Answer</button>
+    <button onclick="copyToClipboard('answerBox')">Копировать Answer</button>
+    <textarea id="answerBox" placeholder="Answer SDP"></textarea>
+
+    <div>
+      <button onclick="setRemoteOffer()">Применить Offer</button>
+      <button onclick="setRemoteAnswer()">Применить Answer</button>
+    </div>
 
     <script>
       let pc;
       const localVideo = document.getElementById('localVideo');
       const remoteVideo = document.getElementById('remoteVideo');
-      const sdpBox = document.getElementById('sdpData');
+      const offerBox = document.getElementById('offerBox');
+      const answerBox = document.getElementById('answerBox');
 
       async function init(){
-        // Проверка HTTPS (на Android/iOS доступ к камере блокируется без HTTPS)
         if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
-          alert('⚠️ Для доступа к камере и микрофону на Android 15 откройте страницу по HTTPS или с localhost.');
+          alert('⚠️ Для Android 15 требуется HTTPS или localhost.');
           return;
         }
 
@@ -56,23 +63,24 @@
           remoteVideo.srcObject = e.streams[0];
         };
 
-        pc.onicecandidate = (e) => {
-          if(e.candidate) return; // ждём конца сбора
-          sdpBox.value = JSON.stringify(pc.localDescription);
-        };
-
         try {
-          // Запрашиваем разрешения отдельно (для Android лучше сначала запросить audio, потом video)
-          const audio = await navigator.mediaDevices.getUserMedia({audio:true});
-          const video = await navigator.mediaDevices.getUserMedia({video:true});
-          const stream = new MediaStream([...audio.getTracks(), ...video.getTracks()]);
-
+          const stream = await navigator.mediaDevices.getUserMedia({ audio:true, video:true });
           localVideo.srcObject = stream;
           stream.getTracks().forEach(track => pc.addTrack(track, stream));
         } catch(err) {
           console.error(err);
-          alert('Ошибка доступа к камере/микрофону: ' + err.name + ' — ' + err.message);
+          alert('Ошибка доступа: ' + err.name + ' — ' + err.message);
         }
+
+        pc.onicecandidate = () => {
+          if (pc.iceGatheringState === 'complete') {
+            if (pc.localDescription.type === 'offer') {
+              offerBox.value = JSON.stringify(pc.localDescription);
+            } else if (pc.localDescription.type === 'answer') {
+              answerBox.value = JSON.stringify(pc.localDescription);
+            }
+          }
+        };
       }
       init();
 
@@ -82,25 +90,35 @@
       }
 
       async function createAnswer(){
-        const offer = JSON.parse(sdpBox.value);
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const remoteOffer = JSON.parse(offerBox.value);
+        await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
       }
 
-      async function addRemoteDesc(){
-        const remote = JSON.parse(sdpBox.value);
+      async function setRemoteOffer(){
+        const remote = JSON.parse(offerBox.value);
         await pc.setRemoteDescription(new RTCSessionDescription(remote));
+      }
+
+      async function setRemoteAnswer(){
+        const remote = JSON.parse(answerBox.value);
+        await pc.setRemoteDescription(new RTCSessionDescription(remote));
+      }
+
+      function copyToClipboard(id){
+        const box = document.getElementById(id);
+        box.select();
+        document.execCommand('copy');
+        alert('Скопировано в буфер обмена');
       }
     </script>
 
-    <p><strong>Как пользоваться (Android 15, iOS, ПК):</strong></p>
+    <p><strong>Как пользоваться:</strong></p>
     <ol>
-      <li>Обязательно откройте страницу по HTTPS или через <code>localhost</code>. Android 15 не даст доступ к камере в <code>http://</code>.</li>
-      <li>Разрешите браузеру доступ к камере и микрофону.</li>
-      <li>Дальше обмен SDP так же, как и раньше: Offer → Answer.</li>
+      <li>На устройстве А нажмите «Создать Offer» и «Копировать Offer». Передайте текст устройству B.</li>
+      <li>На устройстве B вставьте Offer в поле и нажмите «Создать Answer». Скопируйте Answer и передайте устройству A.</li>
+      <li>На устройстве A вставьте Answer в поле и нажмите «Применить Answer».</li>
     </ol>
-
-    <p><strong>Совет:</strong> Для удобного теста загрузите файл на GitHub Pages, Netlify или Vercel (они используют HTTPS по умолчанию).</p>
   </body>
 </html>
