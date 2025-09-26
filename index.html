@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WebRTC Manual Signaling (Offer/Answer)</title>
+    <title>WebRTC Signaling через файлы</title>
     <style>
       body { font-family: Arial, sans-serif; padding:20px; }
       video { width: 100%; max-width: 320px; height: auto; background: #000; }
@@ -14,7 +14,7 @@
     </style>
   </head>
   <body>
-    <h1>Персональные видеозвонки (WebRTC без сигналинг-сервера)</h1>
+    <h1>WebRTC видеозвонки (обмен Offer/Answer через файлы)</h1>
 
     <div class="videos">
       <div>
@@ -29,16 +29,17 @@
 
     <h3>Offer</h3>
     <button onclick="createOffer()">Создать Offer</button>
-    <button onclick="copyToClipboard('offerBox')">Копировать Offer</button>
+    <button onclick="saveToFile('offerBox', 'offer.json')">Сохранить Offer в файл</button>
+    <input type="file" id="offerFile" onchange="loadFromFile(event, 'offerBox')" />
     <textarea id="offerBox" placeholder="Offer SDP"></textarea>
 
     <h3>Answer</h3>
     <button onclick="createAnswer()">Создать Answer</button>
-    <button onclick="copyToClipboard('answerBox')">Копировать Answer</button>
+    <button onclick="saveToFile('answerBox', 'answer.json')">Сохранить Answer в файл</button>
+    <input type="file" id="answerFile" onchange="loadFromFile(event, 'answerBox')" />
     <textarea id="answerBox" placeholder="Answer SDP"></textarea>
 
     <div>
-      <button onclick="setRemoteOffer()">Применить Offer</button>
       <button onclick="setRemoteAnswer()">Применить Answer</button>
     </div>
 
@@ -96,29 +97,36 @@
         await pc.setLocalDescription(answer);
       }
 
-      async function setRemoteOffer(){
-        const remote = JSON.parse(offerBox.value);
-        await pc.setRemoteDescription(new RTCSessionDescription(remote));
-      }
-
       async function setRemoteAnswer(){
         const remote = JSON.parse(answerBox.value);
         await pc.setRemoteDescription(new RTCSessionDescription(remote));
       }
 
-      function copyToClipboard(id){
-        const box = document.getElementById(id);
-        box.select();
-        document.execCommand('copy');
-        alert('Скопировано в буфер обмена');
+      function saveToFile(textareaId, filename){
+        const text = document.getElementById(textareaId).value;
+        const blob = new Blob([text], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        a.click();
+      }
+
+      function loadFromFile(event, textareaId){
+        const file = event.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = e => {
+          document.getElementById(textareaId).value = e.target.result;
+        };
+        reader.readAsText(file);
       }
     </script>
 
     <p><strong>Как пользоваться:</strong></p>
     <ol>
-      <li>На устройстве А нажмите «Создать Offer» и «Копировать Offer». Передайте текст устройству B.</li>
-      <li>На устройстве B вставьте Offer в поле и нажмите «Создать Answer». Скопируйте Answer и передайте устройству A.</li>
-      <li>На устройстве A вставьте Answer в поле и нажмите «Применить Answer».</li>
+      <li>На устройстве А нажмите «Создать Offer» и «Сохранить Offer в файл». Передайте файл устройству B.</li>
+      <li>На устройстве B загрузите файл Offer, нажмите «Создать Answer» и сохраните его в файл. Передайте обратно устройству A.</li>
+      <li>На устройстве A загрузите файл Answer и нажмите «Применить Answer».</li>
     </ol>
   </body>
 </html>
