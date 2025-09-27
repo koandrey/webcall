@@ -3,18 +3,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>WebRTC Signaling через файлы</title>
+    <title>WebRTC Manual Exchange (with ICE)</title>
     <style>
       body { font-family: Arial, sans-serif; padding:20px; }
       video { width: 100%; max-width: 320px; height: auto; background: #000; }
       .videos { display: flex; flex-direction: column; gap:20px; }
       @media(min-width:700px){ .videos { flex-direction: row; } }
-      textarea { width:100%; height:120px; margin-top:12px; }
-      button { margin: 6px 6px 0 0; }
+      textarea { width:100%; height:150px; margin-top:12px; }
+      button { margin: 6px; }
     </style>
   </head>
   <body>
-    <h1>WebRTC видеозвонки (обмен Offer/Answer через файлы)</h1>
+    <h1>WebRTC через файлы (Offer/Answer + ICE)</h1>
 
     <div class="videos">
       <div>
@@ -27,32 +27,22 @@
       </div>
     </div>
 
-    <h3>Offer</h3>
-    <button onclick="createOffer()">Создать Offer</button>
-    <button onclick="saveToFile('offerBox', 'offer.json')">Сохранить Offer в файл</button>
-    <input type="file" id="offerFile" onchange="loadFromFile(event, 'offerBox')" />
-    <textarea id="offerBox" placeholder="Offer SDP"></textarea>
-
-    <h3>Answer</h3>
-    <button onclick="createAnswer()">Создать Answer</button>
-    <button onclick="saveToFile('answerBox', 'answer.json')">Сохранить Answer в файл</button>
-    <input type="file" id="answerFile" onchange="loadFromFile(event, 'answerBox')" />
-    <textarea id="answerBox" placeholder="Answer SDP"></textarea>
-
     <div>
-      <button onclick="setRemoteAnswer()">Применить Answer</button>
+      <button onclick="createOffer()">Создать Offer (файл)</button>
+      <button onclick="createAnswer()">Создать Answer (файл)</button>
+      <input type="file" id="fileInput" />
+      <button onclick="loadFile()">Загрузить файл (Offer/Answer)</button>
     </div>
 
     <script>
       let pc;
+      let candidates = [];
       const localVideo = document.getElementById('localVideo');
       const remoteVideo = document.getElementById('remoteVideo');
-      const offerBox = document.getElementById('offerBox');
-      const answerBox = document.getElementById('answerBox');
 
       async function init(){
         if(location.protocol !== 'https:' && location.hostname !== 'localhost'){
-          alert('⚠️ Для Android 15 требуется HTTPS или localhost.');
+          alert('⚠️ Для работы камеры/микрофона нужен HTTPS или localhost');
           return;
         }
 
@@ -64,69 +54,88 @@
           remoteVideo.srcObject = e.streams[0];
         };
 
+        pc.onicecandidate = (e) => {
+          if(e.candidate){
+            candidates.push(e.candidate.toJSON());
+          }
+        };
+
         try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio:true, video:true });
+          const stream = await navigator.mediaDevices.getUserMedia({audio:true, video:true});
           localVideo.srcObject = stream;
           stream.getTracks().forEach(track => pc.addTrack(track, stream));
         } catch(err) {
-          console.error(err);
-          alert('Ошибка доступа: ' + err.name + ' — ' + err.message);
+          alert('Ошибка доступа: ' + err.message);
         }
-
-        pc.onicecandidate = () => {
-          if (pc.iceGatheringState === 'complete') {
-            if (pc.localDescription.type === 'offer') {
-              offerBox.value = JSON.stringify(pc.localDescription);
-            } else if (pc.localDescription.type === 'answer') {
-              answerBox.value = JSON.stringify(pc.localDescription);
-            }
-          }
-        };
       }
       init();
+
+      function download(data, filename){
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
 
       async function createOffer(){
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        await waitForIce();
+        download({sdp: pc.localDescription, candidates}, 'offer.json');
       }
 
       async function createAnswer(){
-        const remoteOffer = JSON.parse(offerBox.value);
-        await pc.setRemoteDescription(new RTCSessionDescription(remoteOffer));
+        const fileInput = document.getElementById('fileInput');
+        if(fileInput.files.length === 0){
+          alert('Сначала загрузите Offer файл');
+          return;
+        }
+        const offerData = JSON.parse(await fileInput.files[0].text());
+        await pc.setRemoteDescription(new RTCSessionDescription(offerData.sdp));
+        for(const c of offerData.candidates){
+          try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
+        }
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
+        await waitForIce();
+        download({sdp: pc.localDescription, candidates}, 'answer.json');
       }
 
-      async function setRemoteAnswer(){
-        const remote = JSON.parse(answerBox.value);
-        await pc.setRemoteDescription(new RTCSessionDescription(remote));
+      async function loadFile(){
+        const fileInput = document.getElementById('fileInput');
+        if(fileInput.files.length === 0){
+          alert('Выберите файл Offer/Answer');
+          return;
+        }
+        const data = JSON.parse(await fileInput.files[0].text());
+        await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+        for(const c of data.candidates){
+          try{ await pc.addIceCandidate(c); }catch(e){ console.warn(e); }
+        }
+        alert('Удалённое описание и ICE применены');
       }
 
-      function saveToFile(textareaId, filename){
-        const text = document.getElementById(textareaId).value;
-        const blob = new Blob([text], { type: 'application/json' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        a.click();
-      }
-
-      function loadFromFile(event, textareaId){
-        const file = event.target.files[0];
-        if(!file) return;
-        const reader = new FileReader();
-        reader.onload = e => {
-          document.getElementById(textareaId).value = e.target.result;
-        };
-        reader.readAsText(file);
+      function waitForIce(){
+        return new Promise(resolve => {
+          if(pc.iceGatheringState === 'complete') resolve();
+          else {
+            pc.onicegatheringstatechange = () => {
+              if(pc.iceGatheringState === 'complete') resolve();
+            };
+          }
+        });
       }
     </script>
 
     <p><strong>Как пользоваться:</strong></p>
     <ol>
-      <li>На устройстве А нажмите «Создать Offer» и «Сохранить Offer в файл». Передайте файл устройству B.</li>
-      <li>На устройстве B загрузите файл Offer, нажмите «Создать Answer» и сохраните его в файл. Передайте обратно устройству A.</li>
-      <li>На устройстве A загрузите файл Answer и нажмите «Применить Answer».</li>
+      <li>Открой страницу на обоих устройствах (по HTTPS).</li>
+      <li>Устройство A: нажать «Создать Offer» → получить <code>offer.json</code>.</li>
+      <li>Устройство B: загрузить offer.json → нажать «Создать Answer» → получить <code>answer.json</code>.</li>
+      <li>Устройство A: загрузить answer.json → соединение установится.</li>
     </ol>
   </body>
 </html>
